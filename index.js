@@ -2,6 +2,13 @@ const http = require('node:http');
 const fs = require('node:fs');
 const { formidable } = require('formidable');  // formidable v3 用 named import
 
+const header = {
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, Content-Length, X-Requested-With',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'PATCH, POST, GET,OPTIONS,DELETE',
+    'Content-Type': 'application/json'
+}
+
 // ========== 任務一：讀取上傳設定 ==========
 /**
  * 從 process.env 讀取上傳相關設定，回傳設定物件。
@@ -175,6 +182,60 @@ function formatUploadLog(meta, config) {
  *   // 在 createUploadServer 裡：
  *   http.createServer((req, res) => router(req, res, config))
  */
+
+function handleNotFound(res){
+  res.writeHead(404, header)
+  res.write(JSON.stringify({ "success": false, "error": 'Not found' }))
+  res.end()  
+}
+
+function handleUpload(req, res, config){
+  const form = formidable({ uploadDir: config.uploadDir, maxFieldsSize: config.maxFileSize, keepExtensions: true })
+
+  form.on('error', (err) => {
+    console.log('form on error', err)
+    res.writeHead(500, header)
+    res.write(JSON.stringify({ "success": false, "error": err }))
+    res.end()    
+  })
+
+  form.parse(req, (err, fields, files) => {
+    // console.log('files', files)
+    if(err){
+      console.log('err', err)
+      res.writeHead(400, header)
+      res.write(JSON.stringify({ "success": false, "error": err }))
+      res.end()    
+      return
+    }
+
+    if(files.file){
+      const meta = parseFileMetadata(files.file[0])
+      console.log('meta', meta)
+
+      // Check file size
+      if((meta.sizeKB * 1024) > config.maxFileSize){
+        res.writeHead(500, header)
+        res.write(JSON.stringify({ "success": false, "error": `File size limited to ${Math.round(config.maxFileSize / 1024)}KB` }))
+        res.end()   
+      }else{
+        res.writeHead(200, header)
+        res.write(JSON.stringify({
+            filename: meta.filename,
+            sizeKB: meta.sizeKB,
+            ext: meta.ext,
+            savedPath: config.uploadDir
+          } ))
+        res.end()                 
+      }
+    }else{
+      res.writeHead(400, header)
+      res.write(JSON.stringify({ "success": false, "error": 'No file uploaded' }))
+      res.end()   
+    } 
+  })
+}
+
 function router(req, res, config) {
   // TODO: 實作此函式
   // 建議（非強制）：
@@ -186,77 +247,25 @@ function router(req, res, config) {
   //   - 同時 form.parse 的 callback err 也要處理
   //   - 避免重複 res.writeHead（檢查 res.headersSent）
   try {
-    const header = {
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, Content-Length, X-Requested-With',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'PATCH, POST, GET,OPTIONS,DELETE',
-        'Content-Type': 'application/json'
-    }
-
     switch(req.method){
       case 'GET':
         // console.log(req.url)
         if(req.url === '/'){
-          res.writeHead(404, header)
-          res.write(JSON.stringify({ "success": false, "error": 'Not found' }))
-          res.end()              
+          handleNotFound(res)         
         }
         return
       case 'POST':
         if(req.url === '/coaches/avatar'){
-          const form = formidable({ uploadDir: config.uploadDir, maxFieldsSize: config.maxFileSize, keepExtensions: true })
-
-          form.on('error', (err) => {
-            console.log('form on error', err)
-              res.writeHead(500, header)
-              res.write(JSON.stringify({ "success": false, "error": err }))
-              res.end()    
-          })
-
-          form.parse(req, (err, fields, files) => {
-            // console.log('files', files)
-            if(err){
-              console.log('err', err)
-              res.writeHead(400, header)
-              res.write(JSON.stringify({ "success": false, "message": err }))
-              res.end()    
-              return
-            }
-
-            if(files.file){
-              const meta = parseFileMetadata(files.file[0])
-              console.log('meta', meta)
-
-              // Check file size
-              if((meta.sizeKB * 1024) > config.maxFileSize){
-                res.writeHead(500, header)
-                res.write(JSON.stringify({ "success": false, "error": `File size limited to ${Math.round(config.maxFileSize / 1024)}KB` }))
-                res.end()   
-              }else{
-                res.writeHead(200, header)
-                res.write(JSON.stringify({
-                    filename: meta.filename,
-                    sizeKB: meta.sizeKB,
-                    ext: meta.ext,
-                    savedPath: config.uploadDir
-                  } ))
-                res.end()                 
-              }
-            }else{
-              res.writeHead(400, header)
-              res.write(JSON.stringify({ "success": false, "error": 'No file uploaded' }))
-              res.end()   
-            } 
-          })
+          handleUpload(req, res, config)
         }else{
-          res.writeHead(404, header)
-          res.write(JSON.stringify({ "success": false, "message": 'Not found' }))
-          res.end()  
+          handleNotFound(res)  
         }
         return
     }
   } catch (error) {
-    
+    res.writeHead(500, header)
+    res.write(JSON.stringify({ "success": false, "error": error }))
+    res.end()   
   }
 }
 
